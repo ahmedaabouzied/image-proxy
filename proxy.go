@@ -1,13 +1,34 @@
 package main
 
 import (
+	"bytes"
+	"crypto/tls"
+	"io"
+	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/elazarl/goproxy"
 )
 
 // Proxy returns a proxy instance
 func Proxy() *goproxy.ProxyHttpServer {
+	placeholder, err := os.Open("./placeholder.png")
+	if err != nil {
+		log.Fatalf("failed to load placeholder image: %w", err)
+	}
+	defer placeholder.Close()
+
+	rawBody, err := io.ReadAll(placeholder)
+	if err != nil {
+		log.Fatalf("error loading placeholder: %w", err)
+	}
+
+	cert, err := tls.LoadX509KeyPair("./certs/public_certificate.pem", "./certs/private_key.pem")
+	if err != nil {
+		log.Fatalf("error parsing TLS certificate: %w", err)
+	}
 	proxy := goproxy.NewProxyHttpServer()
 
 	// Go proxies always break websites because they canonicalize HTTP headers by default.
@@ -18,15 +39,24 @@ func Proxy() *goproxy.ProxyHttpServer {
 	proxy.PreventCanonicalization = true
 	proxy.KeepDestinationHeaders = true
 	proxy.KeepHeader = true
+	proxy.AllowHTTP2 = true
 
-	// Intercept response
-	proxy.OnResponse().DoFunc(
-		// Add X-Image-Proxy header
-		func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-			resp.Header["X-Image-Proxy"] = []string{"1"}
-			return resp
-		},
-	)
+	// Allow handling of HTTPS requests by signing them with a man-in-the-middle (MITM) certificate
+	customCaMitm := &goproxy.ConnectAction{Action: goproxy.ConnectMitm, TLSConfig: goproxy.TLSConfigFromCA(&cert)}
+	var customAlwaysMitm goproxy.FuncHttpsHandler = func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+		return customCaMitm, host
+	}
+	proxy.OnRequest().HandleConnect(customAlwaysMitm)
 
+	// Enable MITM for HTTPS traffic
+	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		if contentType := resp.Header.Get("Content-Type"); strings.Contains(contentType, "image") {
+			log.Println("Intercepting image")
+			resp.Body = io.NopCloser(bytes.NewBuffer(rawBody))
+		}
+
+		resp.Header.Set("X-Custom-Proxy", "1")
+		return resp
+	})
 	return proxy
 }

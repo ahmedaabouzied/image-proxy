@@ -7,12 +7,9 @@ import (
 )
 
 func main() {
-	fmt.Println("Staring proxy")
-
-	// Init proxy
 	proxy := Proxy()
-	proxy.Verbose = true
 
-	// Listen on proxy port
-	log.Fatal(http.ListenAndServe(":8080", proxy))
+	port := 8080
+	fmt.Printf("Proxy server running on :%d\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), proxy))
 }
