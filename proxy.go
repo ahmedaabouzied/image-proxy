@@ -23,7 +23,7 @@ func Proxy() *goproxy.ProxyHttpServer {
 	proxy.OnResponse().DoFunc(
 		// Add X-Image-Proxy header
 		func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-			resp.Header.Add("X-Image-Proxy", "1")
+			resp.Header["X-Image-Proxy"] = []string{"1"}
 			return resp
 		},
 	)
