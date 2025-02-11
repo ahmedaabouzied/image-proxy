@@ -4,12 +4,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 )
 
 func main() {
 	proxy := Proxy()
 
-	port := 8080
-	fmt.Printf("Proxy server running on :%d\n", port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), proxy))
+	port := os.Getenv("PORT")
+	if port == "" {
+		log.Fatal("PORT env var not found")
+	}
+	fmt.Printf("Proxy server running on :%s\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), proxy))
 }
