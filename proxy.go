@@ -12,9 +12,19 @@ import (
 	"github.com/elazarl/goproxy"
 )
 
+const (
+	placeholderImageEnvKey = "PLACEHOLDER_IMAGE_PATH"
+	publicCertEnvKey       = "PUB_CERT_PATH"
+	privateCertKeyEnvKey   = "PRIVATE_CERT_KEY"
+)
+
 // Proxy returns a proxy instance
 func Proxy() *goproxy.ProxyHttpServer {
-	placeholder, err := os.Open("./placeholder.png")
+	placeholderImagePath := os.Getenv(placeholderImageEnvKey)
+	if placeholderImagePath == "" {
+		log.Fatalf("failed to load placeholer image. No %s found", placeholderImageEnvKey)
+	}
+	placeholder, err := os.Open(placeholderImagePath)
 	if err != nil {
 		log.Fatalf("failed to load placeholder image: %w", err)
 	}
@@ -24,8 +34,13 @@ func Proxy() *goproxy.ProxyHttpServer {
 	if err != nil {
 		log.Fatalf("error loading placeholder: %w", err)
 	}
+	publicCertPath := os.Getenv(publicCertEnvKey)
+	privateCertKeyPath := os.Getenv(privateCertKeyEnvKey)
+	if publicCertPath == "" || privateCertKeyPath == "" {
+		log.Fatalf("both %s and %s environment variables must be set", publicCertPath, privateCertKeyPath)
+	}
 
-	cert, err := tls.LoadX509KeyPair("./certs/public_certificate.pem", "./certs/private_key.pem")
+	cert, err := tls.LoadX509KeyPair(publicCertPath, privateCertKeyPath)
 	if err != nil {
 		log.Fatalf("error parsing TLS certificate: %w", err)
 	}
