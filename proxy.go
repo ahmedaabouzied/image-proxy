@@ -47,6 +47,27 @@ func Proxy() *goproxy.ProxyHttpServer {
 		return customCaMitm, host
 	}
 	proxy.OnRequest().HandleConnect(customAlwaysMitm)
+	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		if acceptHeader := req.Header.Get("Accept"); strings.Contains(acceptHeader, "image") {
+			return req, &http.Response{
+				Request:    req,
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBuffer(rawBody)),
+				Header: http.Header{
+					"Content-Type": []string{"image/png"},
+				},
+			}
+		}
+		resp, err := ctx.RoundTrip(req)
+		if err != nil {
+			return req, &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Header:     http.Header{},
+				Request:    req,
+			}
+		}
+		return req, resp
+	})
 
 	// Enable MITM for HTTPS traffic
 	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
