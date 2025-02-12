@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/elazarl/goproxy"
 )
@@ -46,6 +47,15 @@ func Proxy() *goproxy.ProxyHttpServer {
 	}
 	proxy := goproxy.NewProxyHttpServer()
 
+	var transport = &http.Transport{
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:     false, // Allows connection reuse
+	}
+	proxy.Tr = transport
+
 	// Go proxies always break websites because they canonicalize HTTP headers by default.
 	// While this is a good standard, some other languages and server-client systems don't follow
 	// this standard.
@@ -57,7 +67,8 @@ func Proxy() *goproxy.ProxyHttpServer {
 	proxy.AllowHTTP2 = true
 
 	// Allow handling of HTTPS requests by signing them with a man-in-the-middle (MITM) certificate
-	customCaMitm := &goproxy.ConnectAction{Action: goproxy.ConnectMitm, TLSConfig: goproxy.TLSConfigFromCA(&cert)}
+	tlsConfigFunc := goproxy.TLSConfigFromCA(&cert)
+	customCaMitm := &goproxy.ConnectAction{Action: goproxy.ConnectMitm, TLSConfig: tlsConfigFunc}
 	var customAlwaysMitm goproxy.FuncHttpsHandler = func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 		return customCaMitm, host
 	}
@@ -73,12 +84,32 @@ func Proxy() *goproxy.ProxyHttpServer {
 				},
 			}
 		}
-		resp, err := ctx.RoundTrip(req)
+
+		// Clone the request to modify it safely
+		newReq := req.Clone(req.Context())
+
+		// Reset RequestURI to prevent errors
+		newReq.RequestURI = ""
+
+		// Create an HTTP client with a timeout
+		client := &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		}
+
+		// Make the actual request
+		resp, err := client.Do(newReq)
 		if err != nil {
+			log.Println(err)
 			return req, &http.Response{
 				StatusCode: http.StatusBadGateway,
 				Header:     http.Header{},
 				Request:    req,
+				Body:       http.NoBody,
 			}
 		}
 		return req, resp
