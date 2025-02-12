@@ -20,7 +20,7 @@ FROM --platform=linux/386 alpine:3.18
 # Set environment variables
 ENV PORT=8080
 ENV PLACEHOLDER_IMAGE_PATH="/app/placeholder.png"
-ENV PUB_CERT_PATH="/app/certs/public_certificate.pem"
+ENV PUB_CERT_PATH="/app/certs/rootCA.pem"
 ENV PRIVATE_CERT_KEY="/app/certs/private_key.pem"
 
 # Set the working directory
