@@ -127,3 +127,180 @@ Given the above constraints, it’s **expected** for a MITM proxy to run slower 
 ## Conclusion
 
 Running a full MITM proxy on a small, low-spec machine is inherently CPU-intensive due to the additional cryptographic load. **Slow performance and high CPU usage** are normal and expected in such scenarios. For higher throughput or smoother handling of encrypted traffic, a larger machine with more powerful CPU resources is strongly recommended.
+
+
+# Deployment Instructions
+
+This guide provides instructions for building, deploying, and running your MITM proxy built on **goproxy**. It also includes CPU recommendations for **DigitalOcean** and **AWS**.
+
+## **1. Building the Proxy Locally**
+### **Prerequisites**
+Ensure you have the following installed on your local machine:
+- **Go 1.22+**
+- **Docker**
+- **Git**
+
+### **Building the Binary using Go**
+Clone the repository and navigate to its directory:
+```sh
+git clone <your-repo-url>
+cd <your-repo>
+```
+
+Build the binary for linux:
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -o ./proxy .
+```
+
+### **Alternative: Using Docker**
+```sh
+docker build -t proxy-app .
+```
+
+This will generate a Docker image named `proxy-app`.
+
+---
+
+## **2. Moving to a Host (DigitalOcean / AWS)**
+### **Choosing a Cloud Provider and Instance Type**
+#### **DigitalOcean Recommendations:**
+- **Droplet Type:** CPU-Optimized Droplet
+- **Suggested Plan:**
+  - **Basic:** `s-2vcpu-4gb` (2 vCPUs, 4GB RAM) (Good for low traffic)
+  - **Optimized:** `c-4` (4 vCPUs, 8GB RAM) (For heavier loads)
+- **Storage:** At least **20GB SSD**
+- **OS:** Ubuntu 22.04 LTS or Debian 11
+
+#### **AWS Recommendations:**
+- **Instance Type:**
+  - **Basic:** `t3.medium` (2 vCPUs, 4GB RAM)
+  - **Optimized:** `c5.large` (2 vCPUs, 4GB RAM, better performance)
+  - **Heavy Load:** `c5.xlarge` (4 vCPUs, 8GB RAM)
+- **Storage:** 20GB GP3 SSD
+- **OS:** Amazon Linux 2, Ubuntu 22.04 LTS
+
+### **Transferring Files to the Host**
+Once your host is set up, transfer the files via **SCP**:
+```sh
+scp proxy-app <your-user>@<your-server-ip>:/home/<your-user>/
+```
+Or using **rsync** for faster transfer:
+```sh
+rsync -avz proxy-app <your-user>@<your-server-ip>:/home/<your-user>/
+```
+
+If you are using Docker, transfer the built image. You should consider using dockerhub or a container registry for ease of use:
+```sh
+docker save proxy-app | gzip | ssh <your-user>@<your-server-ip> 'gunzip | docker load'
+```
+
+---
+
+## **3. Running the Proxy on the Host**
+### **Running Directly on the Host (Non-Docker)**
+#### **Grant Execute Permissions and Run**
+```sh
+chmod +x proxy-app
+./proxy-app -port=8080
+```
+
+#### **Run in Background (Using `nohup` or `screen`)**
+```sh
+nohup ./proxy-app -port=8080 > proxy.log 2>&1 &
+```
+
+Or using `screen`:
+```sh
+screen -S proxy-session
+./proxy-app -port=8080
+# Press Ctrl+A, then D to detach
+```
+
+### **Running in Docker**
+Start the container:
+```sh
+docker run -d --name proxy-container -p 8080:8080 proxy-app
+```
+
+To verify the container is running:
+```sh
+docker ps
+```
+
+If you need to restart:
+```sh
+docker restart proxy-container
+```
+
+To check logs:
+```sh
+docker logs -f proxy-container
+```
+
+## **4. Optimizations and Troubleshooting**
+### **Improving Performance on Cloud Servers**
+#### **1. Fixing Low Entropy Issues (TLS Handshake Performance)**
+Check entropy level:
+```sh
+cat /proc/sys/kernel/random/entropy_avail
+```
+If it's below **300**, install `haveged` to improve entropy:
+```sh
+sudo apt install -y haveged
+sudo systemctl enable haveged --now
+```
+
+#### **2. Verifying SSL Handshake Speed**
+```sh
+openssl s_client -connect google.com:443 -time
+```
+
+#### **3. Monitoring System Performance**
+Monitor CPU and memory usage:
+```sh
+top
+htop  # (if installed)
+```
+
+Monitor logs:
+```sh
+docker logs -f proxy-container
+```
+
+#### **4. Restarting the Proxy Automatically**
+If the proxy crashes, restart automatically using **systemd**:
+```sh
+sudo nano /etc/systemd/system/proxy.service
+```
+Paste this:
+```ini
+[Unit]
+Description=MITM Proxy Service
+After=network.target
+
+[Service]
+ExecStart=/home/<your-user>/proxy-app -port=8080
+Restart=always
+User=<your-user>
+
+[Install]
+WantedBy=multi-user.target
+```
+Save and enable the service:
+```sh
+sudo systemctl enable proxy.service --now
+```
+
+---
+
+## **5. Security Considerations**
+- Ensure the proxy port (8080) is open only to **trusted** clients.
+- Use **firewall rules** to restrict access:
+```sh
+sudo ufw allow 8080/tcp
+```
+- If exposed to the internet, consider **TLS encryption** for the proxy itself.
+- Monitor logs for any suspicious activity.
+
+---
+
