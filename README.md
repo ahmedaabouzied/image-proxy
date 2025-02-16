@@ -69,8 +69,6 @@ curl -x http://localhost:8080 https://example.com/sensitive-image.jpg -o output.
 
 # Deployment to a remote host
 
-**Summary Report: The Impact of Running a MITM Proxy on a Smaller Machine**
-
 When running a Go-based Man-in-the-Middle (MITM) proxy (such as one built on top of the [goproxy](https://github.com/elazarl/goproxy) library) on a resource-constrained or smaller CPU machine, several performance bottlenecks are likely to arise. Below is an overview of the main reasons why using a small machine can make the proxy slow or unresponsive, especially under moderate or heavy traffic loads.
 
 ---
