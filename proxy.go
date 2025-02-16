@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/elazarl/goproxy"
-	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -173,13 +172,8 @@ func (i *Interceptor) loadInterceptReqFunc() {
 func (i *Interceptor) loadInterceptRespFunc() {
 	i.interceptRespFunc = func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 		start := time.Now()
-		tracer := otel.Tracer("proxy")
-		_, span := tracer.Start(ctx.Req.Context(), "request")
-		defer span.End()
 		if contentType := resp.Header.Get("Content-Type"); strings.Contains(contentType, "image") {
-			_, span := tracer.Start(ctx.Req.Context(), "intercept")
 			resp.Body = io.NopCloser(bytes.NewBuffer(i.placeholderImage))
-			span.End()
 		}
 
 		resp.Header.Set("X-Custom-Proxy", "1")
