@@ -3,7 +3,7 @@
 This document explains how to use the **Image Proxy** on an iPhone or iPad. By following these steps, you’ll be able to route your iOS device’s traffic through a proxy running on your computer, allowing features like HTTPS interception (MITM) if you install the proxy’s certificate.
 
 ---
-
+**If you've deployed to proxy to a remote host, skip 1 & 2 and jump to [step 3](https://github.com/ahmedaabouzied/image-proxy/edit/main/ios_instrucitons.md#3-configure-the-ios-wi-fi-proxy-settings)**
 ## 1. Connect Your iPhone and Computer to the Same Network
 
 1. **Make sure** your computer (running the Image Proxy app) and your iPhone or iPad are both on the **same Wi-Fi network**.  
