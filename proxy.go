@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"log"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/elazarl/goproxy"
+	"go.opentelemetry.io/otel"
 )
 
 const (
@@ -19,22 +21,54 @@ const (
 	privateCertKeyEnvKey   = "PRIVATE_CERT_KEY"
 )
 
-// Proxy returns a proxy instance
-func Proxy() *goproxy.ProxyHttpServer {
+type Interceptor struct {
+	proxy            *goproxy.ProxyHttpServer
+	cert             tls.Certificate
+	caCertPool       *x509.CertPool
+	client           *http.Client
+	transport        *http.Transport
+	placeholderImage []byte
+
+	// Interceptors
+    matchReqFunc  goproxy.ReqConditionFunc
+	interceptReqFunc  func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response)
+	interceptRespFunc func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response
+	mitmFunc          goproxy.FuncHttpsHandler
+}
+
+func NewInterceptor() *Interceptor {
+	i := &Interceptor{}
+	i.loadPlaceholderImage()
+	i.loadCert()
+	i.loadTransport()
+	i.loadClient()
+	i.loadMITMFunc()
+    i.loadMatchReqFunc()
+	i.loadInterceptReqFunc()
+	i.loadInterceptRespFunc()
+	i.loadProxy()
+	return i
+}
+
+func (i *Interceptor) loadPlaceholderImage() {
 	placeholderImagePath := os.Getenv(placeholderImageEnvKey)
 	if placeholderImagePath == "" {
 		log.Fatalf("failed to load placeholer image. No %s found", placeholderImageEnvKey)
 	}
 	placeholder, err := os.Open(placeholderImagePath)
 	if err != nil {
-		log.Fatalf("failed to load placeholder image: %w", err)
+		log.Fatalf("failed to load placeholder image: %s", err)
 	}
 	defer placeholder.Close()
 
 	rawBody, err := io.ReadAll(placeholder)
 	if err != nil {
-		log.Fatalf("error loading placeholder: %w", err)
+		log.Fatalf("error loading placeholder: %s", err)
 	}
+	i.placeholderImage = rawBody
+}
+
+func (i *Interceptor) loadCert() {
 	publicCertPath := os.Getenv(publicCertEnvKey)
 	privateCertKeyPath := os.Getenv(privateCertKeyEnvKey)
 	if publicCertPath == "" || privateCertKeyPath == "" {
@@ -43,18 +77,35 @@ func Proxy() *goproxy.ProxyHttpServer {
 
 	cert, err := tls.LoadX509KeyPair(publicCertPath, privateCertKeyPath)
 	if err != nil {
-		log.Fatalf("error parsing TLS certificate: %w", err)
+		log.Fatalf("error parsing TLS certificate: %s", err)
 	}
-	proxy := goproxy.NewProxyHttpServer()
+	caCert, err := os.ReadFile(publicCertPath)
+	if err != nil {
+		log.Fatalf("error reading ca cert: %s", err)
+	}
+	caCertPool := x509.NewCertPool()
+	caCertPool.AppendCertsFromPEM(caCert)
+	i.cert = cert
+	i.caCertPool = caCertPool
+}
 
-	var transport = &http.Transport{
+func (i *Interceptor) loadTransport() {
+	transport := &http.Transport{
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		DisableKeepAlives:     false, // Allows connection reuse
+		TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: true,
+		},
 	}
-	proxy.Tr = transport
+	i.transport = transport
+}
+
+func (i *Interceptor) loadProxy() {
+	proxy := goproxy.NewProxyHttpServer()
+    proxy.Tr = i.transport
 
 	// Go proxies always break websites because they canonicalize HTTP headers by default.
 	// While this is a good standard, some other languages and server-client systems don't follow
@@ -66,64 +117,78 @@ func Proxy() *goproxy.ProxyHttpServer {
 	proxy.KeepHeader = true
 	proxy.AllowHTTP2 = true
 
-	// Allow handling of HTTPS requests by signing them with a man-in-the-middle (MITM) certificate
-	tlsConfigFunc := goproxy.TLSConfigFromCA(&cert)
+	// Man in the middle function to intercept HTTP requests
+    if i.mitmFunc != nil {
+	    proxy.OnRequest().HandleConnect(i.mitmFunc)
+    }
+
+	// Intercept requests (after HTTPS handshake) to return our placeholder image
+	proxy.OnRequest(i.matchReqFunc).DoFunc(i.interceptReqFunc)
+
+	// Intercept responses to return our placeholder image
+
+	proxy.OnResponse().DoFunc(i.interceptRespFunc)
+	i.proxy = proxy
+}
+
+func (i *Interceptor) loadClient() {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+	i.client = client
+}
+
+func (i *Interceptor) loadMatchReqFunc() {
+    i.matchReqFunc = goproxy.ReqConditionFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) bool {
+		return strings.Contains(r.Header.Get("Accept"), "image")	
+    })
+}
+
+func (i *Interceptor) loadMITMFunc() {
+	tlsConfigFunc := goproxy.TLSConfigFromCA(&i.cert)
 	customCaMitm := &goproxy.ConnectAction{Action: goproxy.ConnectMitm, TLSConfig: tlsConfigFunc}
-	var customAlwaysMitm goproxy.FuncHttpsHandler = func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+	i.mitmFunc = func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 		return customCaMitm, host
 	}
-	proxy.OnRequest().HandleConnect(customAlwaysMitm)
-	proxy.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		if acceptHeader := req.Header.Get("Accept"); strings.Contains(acceptHeader, "image") {
-			return req, &http.Response{
-				Request:    req,
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(bytes.NewBuffer(rawBody)),
-				Header: http.Header{
-					"Content-Type": []string{"image/png"},
-				},
-			}
-		}
+}
 
-		// Clone the request to modify it safely
-		newReq := req.Clone(req.Context())
-
-		// Reset RequestURI to prevent errors
-		newReq.RequestURI = ""
-
-		// Create an HTTP client with a timeout
-		client := &http.Client{
-			Timeout: 5 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-				IdleConnTimeout:     90 * time.Second,
+func (i *Interceptor) loadInterceptReqFunc() {
+	i.interceptReqFunc = func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		return req, &http.Response{
+			Request:    req,
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBuffer(i.placeholderImage)),
+			Header: http.Header{
+				"Content-Type": []string{"image/png"},
 			},
 		}
+	}
+}
 
-		// Make the actual request
-		resp, err := client.Do(newReq)
-		if err != nil {
-			log.Println(err)
-			return req, &http.Response{
-				StatusCode: http.StatusBadGateway,
-				Header:     http.Header{},
-				Request:    req,
-				Body:       http.NoBody,
-			}
-		}
-		return req, resp
-	})
-
-	// Enable MITM for HTTPS traffic
-	proxy.OnResponse().DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+func (i *Interceptor) loadInterceptRespFunc() {
+	i.interceptRespFunc = func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
+		start := time.Now()
+		tracer := otel.Tracer("proxy")
+		_, span := tracer.Start(ctx.Req.Context(), "request")
+		defer span.End()
 		if contentType := resp.Header.Get("Content-Type"); strings.Contains(contentType, "image") {
-			log.Println("Intercepting image")
-			resp.Body = io.NopCloser(bytes.NewBuffer(rawBody))
+			_, span := tracer.Start(ctx.Req.Context(), "intercept")
+			resp.Body = io.NopCloser(bytes.NewBuffer(i.placeholderImage))
+			span.End()
 		}
 
 		resp.Header.Set("X-Custom-Proxy", "1")
+		log.Printf("Response intercepted. Duration %s", time.Since(start))
 		return resp
-	})
-	return proxy
+	}
+}
+
+// Implement http.Handler interface with underlying proxy handler implementation
+func (i *Interceptor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	i.proxy.ServeHTTP(w, r)
 }
