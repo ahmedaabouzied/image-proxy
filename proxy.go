@@ -3,27 +3,18 @@ package main
 import (
 	"bytes"
 	"crypto/tls"
-	"crypto/x509"
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/elazarl/goproxy"
 )
 
-const (
-	placeholderImageEnvKey = "PLACEHOLDER_IMAGE_PATH"
-	publicCertEnvKey       = "PUB_CERT_PATH"
-	privateCertKeyEnvKey   = "PRIVATE_CERT_KEY"
-)
-
 type Interceptor struct {
 	proxy            *goproxy.ProxyHttpServer
 	cert             tls.Certificate
-	caCertPool       *x509.CertPool
 	client           *http.Client
 	transport        *http.Transport
 	placeholderImage []byte
@@ -50,15 +41,7 @@ func NewInterceptor() *Interceptor {
 }
 
 func (i *Interceptor) loadPlaceholderImage() {
-	placeholderImagePath := os.Getenv(placeholderImageEnvKey)
-	if placeholderImagePath == "" {
-		log.Fatalf("failed to load placeholer image. No %s found", placeholderImageEnvKey)
-	}
-	placeholder, err := os.Open(placeholderImagePath)
-	if err != nil {
-		log.Fatalf("failed to load placeholder image: %s", err)
-	}
-	defer placeholder.Close()
+	placeholder := bytes.NewReader(placeholder)
 
 	rawBody, err := io.ReadAll(placeholder)
 	if err != nil {
@@ -68,24 +51,11 @@ func (i *Interceptor) loadPlaceholderImage() {
 }
 
 func (i *Interceptor) loadCert() {
-	publicCertPath := os.Getenv(publicCertEnvKey)
-	privateCertKeyPath := os.Getenv(privateCertKeyEnvKey)
-	if publicCertPath == "" || privateCertKeyPath == "" {
-		log.Fatalf("both %s and %s environment variables must be set", publicCertPath, privateCertKeyPath)
-	}
-
-	cert, err := tls.LoadX509KeyPair(publicCertPath, privateCertKeyPath)
+	cert, err := tls.X509KeyPair(rootCAPub, rootCAPem)
 	if err != nil {
 		log.Fatalf("error parsing TLS certificate: %s", err)
 	}
-	caCert, err := os.ReadFile(publicCertPath)
-	if err != nil {
-		log.Fatalf("error reading ca cert: %s", err)
-	}
-	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
 	i.cert = cert
-	i.caCertPool = caCertPool
 }
 
 func (i *Interceptor) loadTransport() {

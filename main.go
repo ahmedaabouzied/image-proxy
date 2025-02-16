@@ -1,25 +1,18 @@
 package main
 
 import (
+    "flag"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 )
 
-const portEnvKey = "PORT"
-
 func main() {
-	go func() {
-		interceptor := NewInterceptor()
+    port := flag.String("port", "8080", "Port to run the server on")
+    flag.Parse()
 
-		port := os.Getenv(portEnvKey)
-		if port == "" {
-			log.Fatalf("%s env var must be set", portEnvKey)
-		}
+	interceptor := NewInterceptor()
 
-		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), interceptor))
-	}()
-
-	startUI()
+    log.Printf("Starting server on port %s", *port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", *port), interceptor))
 }
