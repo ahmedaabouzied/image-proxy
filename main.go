@@ -9,15 +9,17 @@ import (
 
 const portEnvKey = "PORT"
 
-
 func main() {
-	interceptor := NewInterceptor()
+	go func() {
+		interceptor := NewInterceptor()
 
-	port := os.Getenv(portEnvKey)
-	if port == "" {
-		log.Fatalf("%s env var must be set", portEnvKey)
-	}
+		port := os.Getenv(portEnvKey)
+		if port == "" {
+			log.Fatalf("%s env var must be set", portEnvKey)
+		}
 
-	fmt.Printf("Proxy server running on :%s\n", port)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), interceptor))
+		log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", port), interceptor))
+	}()
+
+	startUI()
 }
