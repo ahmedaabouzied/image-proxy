@@ -12,6 +12,8 @@ import (
 	"github.com/elazarl/goproxy"
 )
 
+var imageExtensions = []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif", ".bmp", ".tiff"}
+
 type Interceptor struct {
 	proxy            *goproxy.ProxyHttpServer
 	cert             tls.Certificate
@@ -114,6 +116,15 @@ func (i *Interceptor) loadClient() {
 
 func (i *Interceptor) loadMatchReqFunc() {
     i.matchReqFunc = goproxy.ReqConditionFunc(func(r *http.Request, ctx *goproxy.ProxyCtx) bool {
+        // If Chromium based browser, don't rely on the "Accept" headers
+        if strings.Contains(r.Header.Get("User-Agent"), "Chrome") {
+            for _, ext := range imageExtensions {
+                if strings.Contains(r.URL.String(), ext){
+                    return true
+                }
+            }
+            return false
+        }
 		return strings.Contains(r.Header.Get("Accept"), "image")	
     })
 }
